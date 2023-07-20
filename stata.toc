@@ -1,0 +1,4 @@
+v 3
+d Stata code by Zachary King
+
+p ctabxl Tabulate Pearson and Spearman correlations in Excel
