@@ -1,5 +1,5 @@
 *! Title:       ctabxl.ado   
-*! Version:     1.0 published July 20, 2023
+*! Version:     1.1 published July 20, 2023
 *! Author:      Zachary King 
 *! Email:       zacharyjking90@gmail.com
 *! Description: Tabulate Pearson and Spearman correlations in Excel
@@ -18,8 +18,10 @@ program def ctabxl
 	roundto(numlist integer max=1 >0 <27)            ///
 	extrarows(numlist integer max=1 >0 <11)         ///
 	extracols(numlist integer max=1 >0 <11)        ///
+	3stars(numlist sort min=3 max=3 >0 <1)           ///
 	NOZEROS NOPW NOSTARS NOONES BOLD ITALIC         ///
-	PEARSONONLY SPEARMANONLY PEARSONUPPER]
+	PEARSONONLY SPEARMANONLY PEARSONUPPER          ///
+	BONFERRONI SIDAK REPLACE]
 	
 	* Preserve so current dataset is restored after program is finished running
 
@@ -52,6 +54,13 @@ program def ctabxl
 	
 	if "`sheetname'" == "" local sheetname = "Correlations"
 	
+	* Ensure bonferroni and sidak not used in combination
+	
+	if "`bonferroni'" != "" & "`sidak'" != "" {
+		di as error "only one of {bf:bonferroni} and {bf:sidak} options is allowed"
+		exit 198
+	}
+	
 	* Validate length of sheet name not too long
 	
 	if length("`sheetname'") >= 32 {
@@ -78,6 +87,21 @@ program def ctabxl
 	
 	if "`extracols'" == "" local extracols = 0
 	
+	* If replace option not specified, verify current sheet does not exist
+	
+	if "`replace'" == "" {
+		cap: import excel "`using'", sheet("`sheetname'") clear
+		if _rc {
+			restore
+			preserve
+		}
+		else {
+			restore
+			di as error "worksheet {bf:`sheetname'} already exists, specify {bf:replace} option to overwrite it"
+			exit 601
+		}
+	}
+	
 	* Set zeros to missing if nozeros is specified
 	
 	if "`nozeros'" != "" {
@@ -101,10 +125,28 @@ program def ctabxl
 		if r(sd) == 0 di as error "Warning: `v' has no variation in it"
 	}
 	
+	* Ensure bold, italic, and nostars options not used with 3stars option
+	
+	if "`3stars'" != "" & ("`bold'" != "" | "`italic'" != "" | "`nostars'" != "") {
+		di as error "{bf:bold}, {bf:italic}, and {bf:nostars} options not allowed with {bf:3stars} option"
+		exit 198
+	}
+	
+	* Save significance levels if 3stars specified
+	
+	if "`3stars'" != "" {
+		tempname snum s1 s2 s3
+		local `snum' = 3
+		foreach level of numlist `3stars' {
+			local `s``snum''' = `level'
+			local `snum' = ``snum'' - 1
+		}
+	}
+	
 	* Run correlations and save results
 	
 	if "`spearmanonly'" == "" | "`pearsonupper'" != "" {
-		qui: pwcorr `varlist' `if' `in', sig
+		qui: pwcorr `varlist' `if' `in', sig `bonferroni' `sidak'
 		tempname pcoef psig pobs
 		matrix `pcoef' = r(C)
 		matrix `psig' = r(sig)
@@ -112,7 +154,7 @@ program def ctabxl
 	}
 	
 	if "`pearsononly'" == "" {
-		qui: spearman `varlist' `if' `in', stats(rho p) pw
+		qui: spearman `varlist' `if' `in', stats(rho p) pw `bonferroni' `sidak'
 		tempname scoef ssig sobs
 		matrix `scoef' = r(Rho)
 		matrix `ssig' = r(P)
@@ -203,6 +245,11 @@ program def ctabxl
 		else local `signote' = ", italics with * indicates significant at p-value < 0`sig' level (two-tailed)"
 	}
 	
+	if "`3stars'" != "" local `signote' = ", *** (**, *) indicates significant at p-value < 0``s3'' (0``s2'', 0``s1'') level (two-tailed)"   
+	
+	if "`bonferroni'" != "" local `signote' = "``signote'', Bonferroni adjustment used to calculate p-values"
+	else if "`sidak'" != "" local `signote' = "``signote'', Sidak adjustment used to calculate p-values"
+	
 	if "`pearsononly'" != "" qui: putexcel A``r'' = "Pearson correlations``signote''"
 	else if "`pearsonupper'" != "" qui: putexcel A``r'' = "Spearman correlations in bottom triangle, Pearson correlations in top triangle``signote''"
 	else if "`spearmanonly'" != "" qui: putexcel A``r'' = "Spearman correlations``signote''"
@@ -255,13 +302,25 @@ program def ctabxl
 			else if `j' > `i' {
 				if "`spearmanonly'" != "" {
 					local `corrval' : di %-``digits''.`roundto'fc `scoef'[`j',`i']
-					if `ssig'[`j',`i'] < `sig' & "`nostars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					if `ssig'[`j',`i'] < `sig' & "`nostars'" == "" & "`3stars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					else if "`3stars'" != "" {
+						if `ssig'[`j',`i'] < ``s3'' qui: putexcel ```c'''``r'' = "``corrval''***"
+						else if `ssig'[`j',`i'] < ``s2'' qui: putexcel ```c'''``r'' = "``corrval''**"
+						else if `ssig'[`j',`i'] < ``s1'' qui: putexcel ```c'''``r'' = "``corrval''*"
+						else qui: putexcel ```c'''``r'' = "``corrval''"
+					}
 					else qui: putexcel ```c'''``r'' = "``corrval''"
 					if `ssig'[`j',`i'] < `sig' & ("`bold'" != "" | "`italic'" != "") qui: putexcel ```c'''``r'', overwritefmt `bold' `italic'
 				}
 				else {
 					local `corrval' : di %-``digits''.`roundto'fc `pcoef'[`j',`i']
-					if `psig'[`j',`i'] < `sig' & "`nostars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					if `psig'[`j',`i'] < `sig' & "`nostars'" == "" & "`3stars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					else if "`3stars'" != "" {
+						if `psig'[`j',`i'] < ``s3'' qui: putexcel ```c'''``r'' = "``corrval''***"
+						else if `psig'[`j',`i'] < ``s2'' qui: putexcel ```c'''``r'' = "``corrval''**"
+						else if `psig'[`j',`i'] < ``s1'' qui: putexcel ```c'''``r'' = "``corrval''*"
+						else qui: putexcel ```c'''``r'' = "``corrval''"
+					}
 					else qui: putexcel ```c'''``r'' = "``corrval''"
 					if `psig'[`j',`i'] < `sig' & ("`bold'" != "" | "`italic'" != "") qui: putexcel ```c'''``r'', overwritefmt `bold' `italic'
 				}
@@ -287,14 +346,26 @@ program def ctabxl
 			if `j' > `i' {
 				if "`pearsonupper'" == "" {
 					local `corrval' : di %-``digits''.`roundto'fc `scoef'[`i',`j']
-					if `ssig'[`i',`j'] < `sig' & "`nostars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					if `ssig'[`i',`j'] < `sig' & "`nostars'" == "" & "`3stars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					else if "`3stars'" != "" {
+						if `ssig'[`i',`j'] < ``s3'' qui: putexcel ```c'''``r'' = "``corrval''***"
+						else if `ssig'[`i',`j'] < ``s2'' qui: putexcel ```c'''``r'' = "``corrval''**"
+						else if `ssig'[`i',`j'] < ``s1'' qui: putexcel ```c'''``r'' = "``corrval''*"
+						else qui: putexcel ```c'''``r'' = "``corrval''"
+					}
 					else qui: putexcel ```c'''``r'' = "``corrval''"
 					if `ssig'[`i',`j'] < `sig' & ("`bold'" != "" | "`italic'" != "") qui: putexcel ```c'''``r'', overwritefmt `bold' `italic'
 					if ``sameobs'' != 1 qui: putexcel ```c'''``nr'' = `sobs'[`i',`j']
 				}
 				else {
 					local `corrval' : di %-``digits''.`roundto'fc `pcoef'[`i',`j']
-					if `psig'[`i',`j'] < `sig' & "`nostars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					if `psig'[`i',`j'] < `sig' & "`nostars'" == "" & "`3stars'" == "" qui: putexcel ```c'''``r'' = "``corrval''*"
+					else if "`3stars'" != "" {
+						if `psig'[`i',`j'] < ``s3'' & "`3stars'" != "" qui: putexcel ```c'''``r'' = "``corrval''***"
+						else if `psig'[`i',`j'] < ``s2'' & "`3stars'" != "" qui: putexcel ```c'''``r'' = "``corrval''**"
+						else if `psig'[`i',`j'] < ``s1'' & "`3stars'" != "" qui: putexcel ```c'''``r'' = "``corrval''*"
+						else qui: putexcel ```c'''``r'' = "``corrval''"
+					}
 					else qui: putexcel ```c'''``r'' = "``corrval''"
 					if `psig'[`i',`j'] < `sig' & ("`bold'" != "" | "`italic'" != "") qui: putexcel ```c'''``r'', overwritefmt `bold' `italic'
 					if ``sameobs'' != 1 qui: putexcel ```c'''``nr'' = `pobs'[`i',`j']
