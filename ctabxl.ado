@@ -1,5 +1,5 @@
 *! Title:       ctabxl.ado   
-*! Version:     1.1 published July 20, 2023
+*! Version:     1.2 published August 1, 2023
 *! Author:      Zachary King 
 *! Email:       zacharyjking90@gmail.com
 *! Description: Tabulate Pearson and Spearman correlations in Excel
@@ -15,7 +15,7 @@ program def ctabxl
 	syntax varlist(min=3 numeric) [if] [in] using/ [, ///
 	tablename(string) sheetname(string)              ///
 	sig(numlist max=1 >0 <1)                        ///
-	roundto(numlist integer max=1 >0 <27)            ///
+	roundto(numlist integer max=1 >=0 <=26)          ///
 	extrarows(numlist integer max=1 >0 <11)         ///
 	extracols(numlist integer max=1 >0 <11)        ///
 	3stars(numlist sort min=3 max=3 >0 <1)           ///
@@ -65,6 +65,13 @@ program def ctabxl
 	
 	if length("`sheetname'") >= 32 {
 		di as error "sheet name too long; must be less than 32 characters"
+		exit 198
+	}
+	
+	* Ensure sig and 3stars options not used in combination
+	
+	if "`sig'" != "" & "`3stars'" != "" {
+		di as error "only one of {bf:sig} and {bf:3stars} options is allowed"
 		exit 198
 	}
 	
@@ -380,5 +387,34 @@ program def ctabxl
 	* Close Excel
 	
 	qui: putexcel close
+	
+	* Display link to open Excel file
+	
+	display_clickable using "`using'"
+	
+end
+
+program def display_clickable
+
+	syntax using/
+	
+	mata {
+		path_and_file = st_local("using")
+		path = ""
+		file = ""
+		pathsplit(path_and_file, path, file)
+		st_local("path", path) 
+		st_local("file", file) 
+	}
+	
+	if "`path'" == "" local path = "`c(pwd)'"
+	if strrpos("`file'", ".xlsx") == 0 & strrpos("`file'", ".xls") == 0 local file = "`file'.xlsx"
+	
+	mata {
+		file_w_ext_and_path = pathjoin(st_local("path"),st_local("file"))
+		st_local("file_w_ext_and_path", file_w_ext_and_path) 
+	}
+	
+	di as text `"{browse "`file_w_ext_and_path'":click here to open Excel output}"'
 	
 end
