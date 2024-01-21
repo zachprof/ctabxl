@@ -1,7 +1,7 @@
 *! Title:       ctabxl.ado   
 *! Version:     1.2 published August 1, 2023
 *! Author:      Zachary King 
-*! Email:       zacharyjking90@gmail.com
+*! Email:       me@zach.prof
 *! Description: Tabulate Pearson and Spearman correlations in Excel
 
 program def ctabxl
